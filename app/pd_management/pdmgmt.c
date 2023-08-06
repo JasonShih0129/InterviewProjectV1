@@ -14,16 +14,18 @@
 
 LOG_MODULE_DECLARE(periph, CONFIG_PERIPHERAL_LOG_LEVEL);
 
+// Define the global I2C mutex
+K_MUTEX_DEFINE(i2c_mutex);
 
-void PD_Write_Data(const uint8_t *data, size_t len,const uint8_t reg)
+void PD_Write_Data(const uint8_t *data, size_t len, const uint8_t reg)
 {
     const struct device *i2c_pd;
     uint8_t i2c_write_buffer[20];
-    int i;
+    int i,ret;
 
     i2c_pd = device_get_binding("I2C_pd");
 
-    if (i2c_pd == NULL) 
+    if (i2c_pd == NULL)
     {
         printk("Failed to get pd device\n");
         return;
@@ -32,14 +34,22 @@ void PD_Write_Data(const uint8_t *data, size_t len,const uint8_t reg)
     i2c_write_buffer[0] = reg;
     memcpy(&i2c_write_buffer[1], data, len);
 
-    if (i2c_write(i2c_pd, i2c_write_buffer, len + 1, PD_I2C_ADDR) != 0) 
+    // Acquire the I2C mutex lock to ensure exclusive access to I2C bus.
+    k_mutex_lock(&i2c_mutex, K_FOREVER);
+
+    ret = i2c_hub_write(0, i2c_write_buffer, len + 1, PD_I2C_ADDR);
+
+    // Release the I2C mutex lock after the I2C operation is done.
+    k_mutex_unlock(&i2c_mutex);
+
+    if (ret != 0)
     {
         printk("I2C write failed\n");
-    } 
-    else 
+    }
+    else
     {
         printk("I2C write success\n");
-        for(i = 0 ; i < 20 ; i++)
+        for (i = 0; i < 20; i++)
         {
             i2c_write_buffer[i] = 0;
         }
@@ -95,15 +105,15 @@ void PD_Interrupt_Service(void)
         }
 
 
-        // Read PD event in PD reg[0x14]
-        if (i2c_read(i2c_pd, &int_reg_buf, 1, PD_I2C_ADDR, PD_REG_INT_READ) != 0) 
-		{
+        k_mutex_lock(&i2c_mutex, K_FOREVER);
+        // 使用 i2c_hub_read 進行讀取操作
+        if (i2c_hub_read(0, int_reg_buf, 1, PD_I2C_ADDR, PD_REG_INT_READ) != 0) 
+        {
             printk("I2C read failed\n");
         } 
-		else 
-		{
+        else 
+        {
             printk("Interrupt Register Value: 0x%x\n", int_reg_buf);
-
             // Get PD event and trigger PD task.
             if( PD_EV_CONTRACT_READY )
             {
@@ -114,6 +124,7 @@ void PD_Interrupt_Service(void)
                 Task_Code = 0x00;
             }
         }
+        k_mutex_unlock(&i2c_mutex);
         
         // Clear all PD event in PD reg[0x18], that cause PD INT pin de-assert.
         PD_Write_Data(int_reg_clr, int_reg_clr_len, PD_REG_INT_CLEAR);

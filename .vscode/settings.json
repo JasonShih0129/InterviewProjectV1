@@ -1,0 +1,7 @@
+{
+    "search.collapseResults": "alwaysCollapse",
+    "files.associations": {
+        "acpi_region.h": "c",
+        "periphmgmt.h": "c"
+    }
+}

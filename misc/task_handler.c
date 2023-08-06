@@ -35,6 +35,7 @@ const uint32_t periph_thrd_period = 1;
 const uint32_t pwrseq_thrd_period = 10;
 const uint32_t smchost_thrd_period = 10;
 const uint32_t pd_thrd_period = 10;
+const uint32_t chg_thrd_period = 10;
 
 #if defined(CONFIG_ESPI_PERIPHERAL_8042_KBC) && \
 	(defined(CONFIG_PS2_KEYBOARD) || defined(CONFIG_PS2_MOUSE) || \
@@ -57,6 +58,10 @@ K_THREAD_DEFINE(postcode_thrd_id, EC_TASK_STACK_SIZE, postcode_thread,
 
 K_THREAD_DEFINE(pd_thrd_id, EC_TASK_STACK_SIZE, pd_thread,
 		&pd_thrd_period, NULL, NULL, EC_TASK_PRIORITY,
+		K_INHERIT_PERMS, EC_WAIT_FOREVER);
+
+K_THREAD_DEFINE(chg_thrd_id, EC_TASK_STACK_SIZE, chg_thread,
+		&chg_thrd_period, NULL, NULL, EC_TASK_PRIORITY,
 		K_INHERIT_PERMS, EC_WAIT_FOREVER);
 
 
@@ -112,6 +117,9 @@ static struct task_info tasks[] = {
 #endif
 	{ .thread_id = pd_thrd_id, .can_suspend = false,
 	  .tagname = "PD" },
+
+	{ .thread_id = chg_thrd_id, .can_suspend = false,
+	  .tagname = "CHARGE" },
 
 	{ .thread_id = periph_thrd_id, .can_suspend = false,
 	  .tagname = "PERIPH" },
