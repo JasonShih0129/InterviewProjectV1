@@ -18,22 +18,31 @@ LOG_MODULE_DECLARE(periph, CONFIG_PERIPHERAL_LOG_LEVEL);
 void PD_Write_Data(const uint8_t *data, size_t len,const uint8_t reg)
 {
     const struct device *i2c_pd;
-    uint8_t buffer[10];
+    uint8_t i2c_write_buffer[20];
+    int i;
 
     i2c_pd = device_get_binding("I2C_pd");
 
-    if (i2c_pd == NULL) {
+    if (i2c_pd == NULL) 
+    {
         printk("Failed to get pd device\n");
         return;
     }
 
-    buffer[0] = PD_Role_Config_Reg;
-    memcpy(&buffer[1], data, len);
+    i2c_write_buffer[0] = reg;
+    memcpy(&i2c_write_buffer[1], data, len);
 
-    if (i2c_write(i2c_pd, buffer, len + 1, PD_I2C_ADDR) != 0) {
+    if (i2c_write(i2c_pd, i2c_write_buffer, len + 1, PD_I2C_ADDR) != 0) 
+    {
         printk("I2C write failed\n");
-    } else {
+    } 
+    else 
+    {
         printk("I2C write success\n");
+        for(i = 0 ; i < 20 ; i++)
+        {
+            i2c_write_buffer[i] = 0;
+        }
     }
 }
 
@@ -55,14 +64,19 @@ void PD_Power_Role_Configuration(void)
 
 void PD_Initial(void)
 {
-    LOG_INF("%s", __func__);
+    // initial item as below
     PD_B2B_MOS_Configuration();
     PD_Power_Role_Configuration();
 }
 
-void pd_interrupt_handle(void)
+void PD_Interrupt_Service(void)
 {
     const struct device *pd_int;
+
+    uint8_t int_reg_buf[14];
+    uint8_t int_reg_clr[14] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+    size_t int_reg_clr_len = sizeof(int_reg_clr);
+    
     pd_int = device_get_binding("pd_int");
     if (!pd_int) 
 	{
@@ -70,36 +84,71 @@ void pd_interrupt_handle(void)
         return;
     }
 
-    if (!gpio_pin_get(pd_int, PD_INT_Assert)) 
+    if (!gpio_pin_get(pd_int, PD_INT_ASSERT)) 
     {
-        uint8_t int_reg_val;
+        Task_Code = 0x00;
         const struct device *i2c_pd = device_get_binding("I2C_pd");
         if (!i2c_pd) 
-		{
+        {
             printk("Failed to get I2C device\n");
             return;
         }
 
-        if (i2c_read(i2c_pd, &int_reg_val, 1, PD_I2C_ADDR, PD_INT_REG) != 0) 
+
+        // Read PD event in PD reg[0x14]
+        if (i2c_read(i2c_pd, &int_reg_buf, 1, PD_I2C_ADDR, PD_REG_INT_READ) != 0) 
 		{
             printk("I2C read failed\n");
         } 
 		else 
 		{
-            printk("Interrupt Register Value: 0x%x\n", int_reg_val);
-            // 在這裡可以根據讀取到的中斷寄存器值進行相應處理
+            printk("Interrupt Register Value: 0x%x\n", int_reg_buf);
+
+            // Get PD event and trigger PD task.
+            if( PD_EV_CONTRACT_READY )
+            {
+                Task_Code = 0x01;
+            }
+            else
+            {
+                Task_Code = 0x00;
+            }
         }
+        
+        // Clear all PD event in PD reg[0x18], that cause PD INT pin de-assert.
+        PD_Write_Data(int_reg_clr, int_reg_clr_len, PD_REG_INT_CLEAR);
+    }
+    else
+    {
+        Task_Code = 0x00;
+    }
+}
+
+void PD_Task_Service(void)
+{
+    switch(Task_Code)
+    {
+        case ENABLE_B2B_MOS:
+            const uint8_t pd_b2bmos_open[] = {0x53, 0x52, 0x44, 0x59}; // PD 4CC CMD "SRDY"
+            size_t pd_b2bmos_open_len = sizeof(pd_b2bmos_open);
+
+            PD_Write_Data(pd_b2bmos_open, pd_b2bmos_open_len, PD_REG_4CC_CMD);
+            break;
+        default:
+            break;
     }
 }
 
 void pd_thread(void *p1, void *p2, void *p3)
 {
 	uint32_t period = *(uint32_t *)p1;
-	PD_Initial();
-	PD_Interrupt_Service();
+    static uint8_t Task_Code = 0;
 
+    PD_Initial();
 	while (true) 
 	{
-		k_msleep(period);
+		PD_Interrupt_Service();
+    	PD_Task_Service();
+        k_msleep(period);
 	}
 }
