@@ -1,5 +1,5 @@
-#ifndef __PD_MGMT_H__
-#define __PD_MGMT_H__
+#ifndef __CHG_MGMT_H__
+#define __CHG_MGMT_H__
 
 // Charger Device Inform
 #define CHG_I2C_ADDR             0x12
